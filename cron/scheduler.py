@@ -32,7 +32,7 @@ except ImportError:
     except ImportError:
         msvcrt = None
 from pathlib import Path
-from typing import Any, List, Optional
+from typing import Any, List, NamedTuple, Optional
 
 # Add parent directory to path for imports BEFORE repo-level imports.
 # Without this, standalone invocations (e.g. after `hermes update` reloads
@@ -1309,6 +1309,13 @@ _VIDEO_EXTS = frozenset({'.mp4', '.mov', '.avi', '.mkv', '.webm', '.3gp'})
 _IMAGE_EXTS = frozenset({'.jpg', '.jpeg', '.png', '.webp', '.gif'})
 
 
+class _MediaDeliveryOutcome(NamedTuple):
+    """Result of a live-adapter media batch."""
+
+    errors: list[str]
+    may_have_delivered: bool
+
+
 def _send_media_via_adapter(
     adapter,
     chat_id: str,
@@ -1317,22 +1324,30 @@ def _send_media_via_adapter(
     loop,
     job: dict,
     platform=None,
-) -> None:
+) -> _MediaDeliveryOutcome:
     """Send extracted MEDIA files as native platform attachments via a live adapter.
 
     Routes each file to the appropriate adapter method (send_voice, send_image_file,
     send_video, send_document) based on file extension — mirroring the routing logic
     in ``BasePlatformAdapter._process_message_background``.
+
+    Returns one error string per attachment whose delivery was not explicitly
+    confirmed plus whether any attachment may already have been delivered. All
+    attachments are attempted so a single failure does not hide later outcomes.
     """
     from pathlib import Path
 
     from gateway.platforms.base import BasePlatformAdapter, should_send_media_as_audio
 
     media_files = BasePlatformAdapter.filter_media_delivery_paths(media_files)
+    delivery_errors: list[str] = []
+    may_have_delivered = False
 
     for media_path, _is_voice in media_files:
+        attachment_may_have_delivered = False
         try:
             ext = Path(media_path).suffix.lower()
+            media_name = Path(media_path).name
             route_platform = platform if platform is not None else getattr(adapter, "platform", None)
             if should_send_media_as_audio(route_platform, ext, is_voice=_is_voice):
                 coro = adapter.send_voice(chat_id=chat_id, audio_path=media_path, metadata=metadata)
@@ -1346,23 +1361,47 @@ def _send_media_via_adapter(
             from agent.async_utils import safe_schedule_threadsafe
             future = safe_schedule_threadsafe(coro, loop)
             if future is None:
-                logger.warning(
-                    "Job '%s': cannot send media %s, gateway loop unavailable",
-                    job.get("id", "?"), media_path,
-                )
-                return
+                msg = f"cannot send media {media_name}, gateway loop unavailable"
+                logger.warning("Job '%s': %s", job.get("id", "?"), msg)
+                delivery_errors.append(msg)
+                continue
+            # Once accepted by the event loop, delivery is possible unless a
+            # later explicit SendResult or successful cancellation proves it
+            # did not happen.
+            attachment_may_have_delivered = True
             try:
                 result = future.result(timeout=30)
             except TimeoutError:
+                # Cancellation is best-effort cleanup only. The proxy returned
+                # by asyncio.run_coroutine_threadsafe() can still be cancelled
+                # after its underlying task started, so timeout remains an
+                # ambiguous delivery and must not authorize a whole-batch retry.
                 future.cancel()
                 raise
-            if result and not getattr(result, "success", True):
-                logger.warning(
-                    "Job '%s': media send failed for %s: %s",
-                    job.get("id", "?"), media_path, getattr(result, "error", "unknown"),
+            if not _confirm_adapter_delivery(result):
+                if result is not None and hasattr(result, "success"):
+                    attachment_may_have_delivered = bool(result.success)
+                if result is None:
+                    err = "no response from adapter"
+                    shape = "None"
+                else:
+                    err = getattr(result, "error", None)
+                    shape = type(result).__name__
+                msg = (
+                    f"media send failed for {media_name}: "
+                    f"unconfirmed result ({shape}, error={err})"
                 )
+                logger.warning("Job '%s': %s", job.get("id", "?"), msg)
+                delivery_errors.append(msg)
         except Exception as e:
-            logger.warning("Job '%s': failed to send media %s: %s", job.get("id", "?"), media_path, e)
+            media_name = Path(media_path).name
+            msg = f"failed to send media {media_name}: {e}"
+            delivery_errors.append(msg)
+            logger.warning("Job '%s': %s", job.get("id", "?"), msg)
+        finally:
+            may_have_delivered = may_have_delivered or attachment_may_have_delivered
+
+    return _MediaDeliveryOutcome(delivery_errors, may_have_delivered)
 
 
 def _confirm_adapter_delivery(send_result) -> bool:
@@ -1871,8 +1910,10 @@ def _deliver_result(job: dict, content: str, adapters=None, loop=None) -> Option
                 # payload is already assumed delivered (#38922).  Record the
                 # skipped attachments so the drop is visible rather than silently
                 # lost.
+                media_delivery_errors: list[str] = []
+                media_may_have_delivered = False
                 if adapter_ok and not timed_out and media_files:
-                    _send_media_via_adapter(
+                    media_outcome = _send_media_via_adapter(
                         runtime_adapter,
                         chat_id,
                         media_files,
@@ -1881,16 +1922,47 @@ def _deliver_result(job: dict, content: str, adapters=None, loop=None) -> Option
                         job,
                         platform=platform,
                     )
+                    media_delivery_errors = media_outcome.errors
+                    media_may_have_delivered = media_outcome.may_have_delivered
                 elif timed_out and media_files:
                     msg = (
                         f"{len(media_files)} media attachment(s) not delivered to "
                         f"{platform_name}:{chat_id} (live adapter confirmation timed out)"
                     )
                     logger.warning("Job '%s': %s", job["id"], msg)
-                    delivery_errors.append(msg)
+                    media_delivery_errors.append(msg)
+
+                if media_delivery_errors:
+                    safe_media_only_retry = (
+                        not text_to_send and not media_may_have_delivered
+                    )
+                    if safe_media_only_retry:
+                        target_errors.extend(media_delivery_errors)
+                        adapter_ok = False
+                        logger.warning(
+                            "Job '%s': all media-only live adapter sends failed "
+                            "before delivery, falling back to standalone",
+                            job["id"],
+                        )
+                    else:
+                        delivery_errors.extend(media_delivery_errors)
+                        # Keep adapter_ok true: the live path may already have sent
+                        # text or earlier attachments. Falling back with the whole
+                        # payload would duplicate those successful components.
 
                 if adapter_ok:
-                    logger.info("Job '%s': delivered to %s:%s via live adapter", job["id"], platform_name, chat_id)
+                    if media_delivery_errors:
+                        logger.warning(
+                            "Job '%s': partial delivery to %s:%s via live adapter; "
+                            "media attachment failure(s): %s",
+                            job["id"], platform_name, chat_id,
+                            "; ".join(media_delivery_errors),
+                        )
+                    else:
+                        logger.info(
+                            "Job '%s': delivered to %s:%s via live adapter",
+                            job["id"], platform_name, chat_id,
+                        )
                     delivered = True
                     # Seed the thread session only now that delivery into it
                     # succeeded (deferred from thread-open above).

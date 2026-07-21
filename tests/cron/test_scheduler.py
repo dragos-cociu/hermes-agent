@@ -779,6 +779,95 @@ class TestDeliverResultWrapping:
         assert adapter.send_image_file.call_args[1]["image_path"] == str(media_path)
         adapter.send_voice.assert_not_called()
 
+    @pytest.mark.parametrize(
+        ("include_text", "voice_success", "expect_fallback"),
+        [(True, True, False), (False, True, False), (False, False, True)],
+        ids=["text-and-media-partial", "media-only-partial", "media-only-total-failure"],
+    )
+    def test_live_adapter_media_failures_use_only_safe_fallback(
+        self, tmp_path, monkeypatch, caplog,
+        include_text, voice_success, expect_fallback,
+    ):
+        """Retry only when no text or attachment may already be delivered."""
+        from concurrent.futures import Future
+        from gateway.config import Platform
+        from gateway.platforms.base import SendResult
+
+        voice_path = self._safe_media_path(tmp_path, monkeypatch, "voice.mp3")
+        image_path = self._safe_media_path(tmp_path, monkeypatch, "chart.png")
+        adapter = AsyncMock()
+        adapter.send.return_value = SendResult(success=True)
+        adapter.send_voice.return_value = SendResult(
+            success=voice_success,
+            error=None if voice_success else "Voice upload rejected",
+        )
+        adapter.send_image_file.return_value = SendResult(
+            success=False,
+            error="Connection Closed",
+        )
+
+        pconfig = MagicMock()
+        pconfig.enabled = True
+        mock_cfg = MagicMock()
+        mock_cfg.platforms = {Platform.DISCORD: pconfig}
+        mock_cfg.filter_silence_narration = False
+
+        loop = MagicMock()
+        loop.is_running.return_value = True
+
+        def fake_run_coro(coro, _loop):
+            import asyncio as _asyncio
+
+            future = Future()
+            try:
+                future.set_result(_asyncio.run(coro))
+            except BaseException as exc:  # noqa: BLE001
+                future.set_exception(exc)
+            return future
+
+        job = {
+            "id": "partial-media-job",
+            "deliver": "origin",
+            "origin": {"platform": "discord", "chat_id": "1234"},
+        }
+        standalone_send = AsyncMock(return_value={"success": True})
+        content_parts = []
+        if include_text:
+            content_parts.append("Attachments follow")
+        content_parts.extend((f"MEDIA:{voice_path}", f"MEDIA:{image_path}"))
+
+        caplog.set_level(logging.INFO, logger="cron.scheduler")
+        with patch("gateway.config.load_gateway_config", return_value=mock_cfg), \
+             patch("cron.scheduler.load_config", return_value={"cron": {"wrap_response": False}}), \
+             patch("asyncio.run_coroutine_threadsafe", side_effect=fake_run_coro), \
+             patch("tools.send_message_tool._send_to_platform", new=standalone_send):
+            result = _deliver_result(
+                job,
+                "\n".join(content_parts),
+                adapters={Platform.DISCORD: adapter},
+                loop=loop,
+            )
+
+        if expect_fallback:
+            assert result is None
+            standalone_send.assert_awaited_once()
+        else:
+            assert result is not None
+            assert "Connection Closed" in result
+            assert image_path.name in result
+            assert str(image_path.parent) not in result
+            standalone_send.assert_not_awaited()
+        if include_text:
+            adapter.send.assert_called_once()
+        else:
+            adapter.send.assert_not_called()
+        adapter.send_voice.assert_called_once()
+        adapter.send_image_file.assert_called_once()
+        assert not any(
+            "delivered to discord:1234 via live adapter" in record.message
+            for record in caplog.records
+        )
+
     def test_live_adapter_media_only_no_text(self, tmp_path, monkeypatch):
         """When content is ONLY a MEDIA tag with no text, media should still be sent."""
         from gateway.config import Platform
@@ -3116,7 +3205,9 @@ class TestSendMediaViaAdapter:
             return completed
 
         with patch("asyncio.run_coroutine_threadsafe", side_effect=fake_run_coro):
-            _send_media_via_adapter(adapter, chat_id, media_files, metadata, MagicMock(), job)
+            return _send_media_via_adapter(
+                adapter, chat_id, media_files, metadata, MagicMock(), job
+            )
 
     def test_video_dispatched_to_send_video(self, tmp_path, monkeypatch):
         adapter = MagicMock()
@@ -3143,7 +3234,51 @@ class TestSendMediaViaAdapter:
         voice_path = self._safe_media_path(tmp_path, monkeypatch, "voice.mp3")
         photo_path = self._safe_media_path(tmp_path, monkeypatch, "photo.jpg")
         media_files = [(str(voice_path), False), (str(photo_path), False)]
-        self._run_with_loop(adapter, "123", media_files, None, {"id": "j3"})
+        outcome = self._run_with_loop(
+            adapter, "123", media_files, None, {"id": "j3"}
+        )
+        assert outcome.errors == []
+        assert outcome.may_have_delivered is True
+        adapter.send_voice.assert_called_once()
+        adapter.send_image_file.assert_called_once()
+
+    def test_unconfirmed_media_result_is_error_and_remaining_files_are_attempted(
+        self, tmp_path, monkeypatch
+    ):
+        from concurrent.futures import Future
+
+        adapter = MagicMock()
+        adapter.send_voice = AsyncMock()
+        adapter.send_image_file = AsyncMock()
+        voice_path = self._safe_media_path(tmp_path, monkeypatch, "voice.mp3")
+        photo_path = self._safe_media_path(tmp_path, monkeypatch, "photo.jpg")
+        media_files = [(str(voice_path), False), (str(photo_path), False)]
+
+        first = Future()
+        first.set_result(None)
+        second = Future()
+        second.set_result(MagicMock(success=True))
+        futures = iter((first, second))
+
+        def fake_run_coro(coro, _loop):
+            coro.close()
+            return next(futures)
+
+        with patch("asyncio.run_coroutine_threadsafe", side_effect=fake_run_coro):
+            outcome = _send_media_via_adapter(
+                adapter,
+                "123",
+                media_files,
+                None,
+                MagicMock(),
+                {"id": "j4"},
+            )
+
+        assert len(outcome.errors) == 1
+        assert voice_path.name in outcome.errors[0]
+        assert str(voice_path.parent) not in outcome.errors[0]
+        assert "unconfirmed result (None" in outcome.errors[0]
+        assert outcome.may_have_delivered is True
         adapter.send_voice.assert_called_once()
         adapter.send_image_file.assert_called_once()
 
@@ -4139,6 +4274,43 @@ class TestSendMediaTimeoutCancelsFuture:
         # 2. Second file still got dispatched — one timeout doesn't abort the batch
         adapter.send_video.assert_called_once()
         assert adapter.send_video.call_args[1]["video_path"] == str(fast.resolve())
+
+    @pytest.mark.parametrize("cancelled", [True, False])
+    def test_timeout_outcome_remains_ambiguous_after_cancel(
+        self, tmp_path, monkeypatch, cancelled
+    ):
+        adapter = MagicMock()
+        adapter.send_image_file = AsyncMock()
+
+        root = tmp_path / "media-cache"
+        media_path = root / "slow.png"
+        media_path.parent.mkdir(parents=True)
+        media_path.write_bytes(b"slow")
+        monkeypatch.setattr(
+            "gateway.platforms.base.MEDIA_DELIVERY_SAFE_ROOTS",
+            (root,),
+        )
+
+        timed_out = MagicMock()
+        timed_out.result.side_effect = TimeoutError("timed out")
+        timed_out.cancel.return_value = cancelled
+
+        def fake_run_coro(coro, _loop):
+            coro.close()
+            return timed_out
+
+        with patch("asyncio.run_coroutine_threadsafe", side_effect=fake_run_coro):
+            outcome = _send_media_via_adapter(
+                adapter,
+                "chat-1",
+                [(str(media_path), False)],
+                None,
+                MagicMock(),
+                {"id": "media-timeout-state"},
+            )
+
+        assert len(outcome.errors) == 1
+        assert outcome.may_have_delivered is True
 
 
 class TestCronDeliveryTargets:
