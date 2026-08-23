@@ -49,6 +49,8 @@ Wire format (POST body)::
         "tool_name":       null,
         "tool_input":      null,
         "session_id":      "sess_abc123",
+        "producer_sequence": 1,           # monotonic per effective session
+        "producer":        "hermes-outbound-webhook-v1",
         "cwd":             "/home/user/project",
         "extra":           {...},          # event-specific kwargs
         "delivery_id":     "3f2c...",      # uuid4, unique per POST
@@ -107,6 +109,13 @@ _delivery_queue: "queue.Queue[Optional[Dict[str, Any]]]" = queue.Queue(
 )
 _worker_lock = threading.Lock()
 _worker: Optional[threading.Thread] = None
+
+# Assigned synchronously, before enqueue, so queue drops remain observable as
+# producer-side gaps at the receiver.  The lock covers only an in-memory
+# increment and never network I/O.
+_producer_sequences: Dict[str, int] = {}
+_producer_sequences_lock = threading.Lock()
+PRODUCER_ID = "hermes-outbound-webhook-v1"
 
 
 @dataclass
@@ -235,6 +244,8 @@ def reset_for_tests() -> None:
     """Clear the idempotence set and drain the queue.  Test-only helper."""
     with _registered_lock:
         _registered.clear()
+    with _producer_sequences_lock:
+        _producer_sequences.clear()
     try:
         while True:
             _delivery_queue.get_nowait()
@@ -412,6 +423,10 @@ def _serialize_payload(
     lives inside the HMAC-signed body, it doubles as replay protection.
     """
     extras = {k: v for k, v in kwargs.items() if k not in _TOP_LEVEL_PAYLOAD_KEYS}
+    session_id = kwargs.get("session_id") or kwargs.get("parent_session_id") or ""
+    with _producer_sequences_lock:
+        producer_sequence = _producer_sequences.get(session_id, 0) + 1
+        _producer_sequences[session_id] = producer_sequence
     try:
         cwd = str(Path.cwd())
     except OSError:
@@ -420,7 +435,9 @@ def _serialize_payload(
         "hook_event_name": event,
         "tool_name": kwargs.get("tool_name"),
         "tool_input": kwargs.get("args") if isinstance(kwargs.get("args"), dict) else None,
-        "session_id": kwargs.get("session_id") or kwargs.get("parent_session_id") or "",
+        "session_id": session_id,
+        "producer_sequence": producer_sequence,
+        "producer": PRODUCER_ID,
         "cwd": cwd,
         "extra": extras,
         "delivery_id": delivery_id,

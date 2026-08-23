@@ -296,6 +296,8 @@ class TestPayload:
         assert payload["tool_name"] == "terminal"
         assert payload["tool_input"] == {"command": "ls"}
         assert payload["session_id"] == "sess_1"
+        assert payload["producer_sequence"] == 1
+        assert payload["producer"] == outbound_webhooks.PRODUCER_ID
         assert payload["extra"]["status"] == "ok"
         assert payload["extra"]["duration_ms"] == 42
         assert payload["delivery_id"] == "did_1234"
@@ -307,6 +309,43 @@ class TestPayload:
         )
         payload = json.loads(body)
         assert isinstance(payload["extra"]["weird"], str)
+
+    def test_sequence_is_monotonic_per_effective_session(self):
+        first = json.loads(outbound_webhooks._serialize_payload(
+            "on_session_start", {"session_id": "one"}, "did_1"))
+        second = json.loads(outbound_webhooks._serialize_payload(
+            "on_session_end", {"session_id": "one"}, "did_2"))
+        other = json.loads(outbound_webhooks._serialize_payload(
+            "on_session_start", {"parent_session_id": "two"}, "did_3"))
+        assert [first["producer_sequence"], second["producer_sequence"]] == [1, 2]
+        assert other["producer_sequence"] == 1
+
+    def test_sequence_assignment_is_thread_safe_and_unique(self):
+        barrier = threading.Barrier(16)
+        bodies = []
+        bodies_lock = threading.Lock()
+
+        def serialize(index):
+            barrier.wait()
+            body = outbound_webhooks._serialize_payload(
+                "post_tool_call", {"session_id": "shared", "index": index},
+                f"did_{index}",
+            )
+            with bodies_lock:
+                bodies.append(json.loads(body))
+
+        threads = [threading.Thread(target=serialize, args=(index,)) for index in range(16)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+
+        assert sorted(item["producer_sequence"] for item in bodies) == list(range(1, 17))
+        # Canonical JSON serialization remains stable once volatile metadata is removed.
+        normalized = [{key: value for key, value in item.items()
+                       if key not in {"timestamp", "delivery_id", "producer_sequence", "extra"}}
+                      for item in bodies]
+        assert all(item == normalized[0] for item in normalized)
 
 
 # ── registration ──────────────────────────────────────────────────────────
