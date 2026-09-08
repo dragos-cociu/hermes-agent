@@ -2828,6 +2828,7 @@ def terminal_tool(
     pty: bool = False,
     notify_on_complete: bool = False,
     watch_patterns: Optional[List[str]] = None,
+    gate_key: Optional[str] = None,
 ) -> str:
     """
     Execute a command in the configured terminal environment.
@@ -2843,6 +2844,7 @@ def terminal_tool(
         pty: If True, use pseudo-terminal for interactive CLI tools (local backend only)
         notify_on_complete: If True and background=True, you'll be notified exactly once when the process exits. The right choice for almost every long task. MUTUALLY EXCLUSIVE with watch_patterns.
         watch_patterns: List of strings to watch for in background output. HARD rate limit: 1 notification per 15s per process. After 3 strike windows in a row — or after a small lifetime cap of delivered matches, however cleanly spaced — watch_patterns is disabled and the session is auto-promoted to notify_on_complete. Use ONLY for rare, one-shot mid-process signals on long-lived processes (server readiness, migration-done markers). NEVER use in loops/batch jobs — error patterns there will hit the strike limit and get disabled. MUTUALLY EXCLUSIVE with notify_on_complete — set one, not both.
+        gate_key: Optional explicit verification telemetry key. Invalid values are ignored.
 
     Returns:
         str: JSON string with output, exit_code, and error fields
@@ -3811,6 +3813,7 @@ def terminal_tool(
                     session_id=session_id or task_id or effective_task_id or "default",
                     exit_code=returncode,
                     output=output,
+                    gate_key=gate_key,
                 )
                 if evidence:
                     result_dict["verification_evidence"] = {
@@ -3819,6 +3822,8 @@ def terminal_tool(
                         "scope": evidence.get("scope"),
                         "canonical_command": evidence.get("canonical_command"),
                     }
+                    if "gateKey" in evidence:
+                        result_dict["verification_evidence"]["gateKey"] = evidence["gateKey"]
             except Exception:
                 logger.debug("verification evidence recording failed", exc_info=True)
             if approval_note:
@@ -4131,6 +4136,11 @@ TERMINAL_SCHEMA = {
                 "type": "array",
                 "items": {"type": "string"},
                 "description": "Strings to watch for in background output. ONLY for rare one-shot mid-process signals on processes that never exit (e.g. ['Application startup complete'] on a server). NOT for end-of-run markers (use notify_on_complete) and NOT for per-iteration patterns like 'ERROR' in loops — rate-limited to 1 notification/15s, capped at a small number of matches over the process's lifetime; over-firing auto-disables it and falls back to notify-on-exit. When in doubt, use notify_on_complete. MUTUALLY EXCLUSIVE with notify_on_complete."
+            },
+            "gate_key": {
+                "type": "string",
+                "maxLength": 256,
+                "description": "Authored, explicit telemetry key for verification evidence; it is not inferred."
             }
         },
         "required": ["command"]
@@ -4160,6 +4170,7 @@ def _handle_terminal(args, **kw):
         pty=args.get("pty", False),
         notify_on_complete=args.get("notify_on_complete", False),
         watch_patterns=args.get("watch_patterns"),
+        gate_key=args.get("gate_key"),
     )
 
 

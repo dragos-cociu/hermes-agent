@@ -23,6 +23,7 @@ from hermes_constants import get_hermes_home
 
 _DB_LOCK = threading.Lock()
 _MAX_OUTPUT_SUMMARY_CHARS = 2000
+_MAX_GATE_KEY_CHARS = 256
 _MAX_EVIDENCE_AGE_DAYS = 30
 _MAX_EVENTS_PER_SESSION_ROOT = 100
 _MAX_TOTAL_UNREFERENCED_EVENTS = 10_000
@@ -567,6 +568,7 @@ def record_terminal_result(
     session_id: str | None,
     exit_code: int,
     output: str = "",
+    gate_key: str | None = None,
 ) -> Optional[dict[str, Any]]:
     """Record a foreground terminal result when it is verification evidence."""
 
@@ -671,7 +673,15 @@ def _insert_evidence(evidence: VerificationEvidence) -> dict[str, Any]:
             _prune_old_events(conn, session_id=evidence.session_id, root=evidence.root)
             conn.commit()
 
-    return {"id": event_id, **evidence.__dict__, "created_at": created_at}
+    result = {"id": event_id, **evidence.__dict__, "created_at": created_at}
+    if (
+        isinstance(gate_key, str)
+        and gate_key
+        and len(gate_key) <= _MAX_GATE_KEY_CHARS
+        and "\x00" not in gate_key
+    ):
+        result["gateKey"] = gate_key
+    return result
 
 
 def mark_workspace_edited(

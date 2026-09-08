@@ -1,5 +1,7 @@
 """Regression tests for sudo detection and sudo password handling."""
 
+import json
+
 import tools.terminal_tool as terminal_tool
 
 
@@ -28,6 +30,14 @@ def test_terminal_schema_advertises_persistent_env_state():
     assert "exported environment variables persist between calls" in description
     assert "activate a virtualenv" in description
     assert "once per session" in description
+
+
+def test_terminal_schema_exposes_optional_gate_key():
+    parameters = terminal_tool.TERMINAL_SCHEMA["parameters"]
+
+    assert parameters["properties"]["gate_key"]["type"] == "string"
+    assert parameters["properties"]["gate_key"]["maxLength"] == 256
+    assert "gate_key" not in parameters["required"]
 
 
 def test_printf_literal_sudo_does_not_trigger_rewrite(monkeypatch):
@@ -106,3 +116,40 @@ def test_validate_workdir_still_blocks_metachars_in_unicode_paths():
 def test_count_real_sudo_invocations_ignores_mentions(monkeypatch):
     assert terminal_tool._count_real_sudo_invocations("grep sudo README.md") == 0
     assert terminal_tool._count_real_sudo_invocations("sudo a; sudo b") == 2
+
+
+def test_terminal_result_propagates_explicit_gate_key_only(monkeypatch, tmp_path):
+    captured = []
+
+    def fake_record_terminal_result(**kwargs):
+        captured.append(kwargs)
+        evidence = {
+            "status": "passed",
+            "kind": "test",
+            "scope": "full",
+            "canonical_command": "classifier-output-must-not-be-a-key",
+        }
+        if kwargs.get("gate_key") == "gate-42":
+            evidence["gateKey"] = "gate-42"
+        return evidence
+
+    monkeypatch.setattr(
+        "agent.verification_evidence.record_terminal_result",
+        fake_record_terminal_result,
+    )
+
+    explicit = json.loads(
+        terminal_tool.terminal_tool(
+            command="printf ok",
+            workdir=str(tmp_path),
+            gate_key="gate-42",
+        )
+    )
+    absent = json.loads(
+        terminal_tool.terminal_tool(command="printf ok", workdir=str(tmp_path))
+    )
+
+    assert captured[0]["gate_key"] == "gate-42"
+    assert explicit["verification_evidence"]["gateKey"] == "gate-42"
+    assert captured[1]["gate_key"] is None
+    assert "gateKey" not in absent["verification_evidence"]

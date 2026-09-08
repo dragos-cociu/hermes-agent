@@ -319,6 +319,46 @@ def test_recording_expires_old_edit_only_state(tmp_path, monkeypatch):
     assert status["changed_paths"] == []
 
 
+def test_record_terminal_result_propagates_only_explicit_valid_gate_key(tmp_path, monkeypatch):
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path / ".hermes"))
+    _node_project(tmp_path)
+
+    explicit = record_terminal_result(
+        command="pnpm test",
+        cwd=tmp_path,
+        session_id="gate-from-session-must-not-be-inferred",
+        exit_code=0,
+        gate_key="  gate/Alpha-01  ",
+    )
+    absent = record_terminal_result(
+        command="pnpm test gate-from-command-must-not-be-inferred",
+        cwd=tmp_path,
+        session_id="gate-from-session-must-not-be-inferred",
+        exit_code=0,
+    )
+
+    assert explicit is not None
+    assert explicit["gateKey"] == "  gate/Alpha-01  "
+    assert absent is not None
+    assert "gateKey" not in absent
+
+
+def test_record_terminal_result_rejects_invalid_gate_keys_without_fallback(tmp_path, monkeypatch):
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path / ".hermes"))
+    _node_project(tmp_path)
+
+    for invalid in ("", "bad\x00key", "x" * 257, 42):
+        evidence = record_terminal_result(
+            command="pnpm test",
+            cwd=tmp_path,
+            session_id="classifier-fallback-forbidden",
+            exit_code=0,
+            gate_key=invalid,  # type: ignore[arg-type]
+        )
+        assert evidence is not None
+        assert "gateKey" not in evidence
+
+
 def test_windows_backslash_ad_hoc_script_path_is_matched(tmp_path, monkeypatch):
     """Ad-hoc verification scripts with Windows backslash paths must be
     matched by ``_find_ad_hoc_match`` trying ``posix=False`` in addition to
