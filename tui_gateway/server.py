@@ -610,7 +610,11 @@ def _load_interim_assistant_messages() -> bool:
 
 
 def _notify_session_boundary(
-    event_type: str, session_id: str | None, platform: str | None = None
+    event_type: str,
+    session_id: str | None,
+    platform: str | None = None,
+    task_contract_id: str | None = None,
+    trace_id: str | None = None,
 ) -> None:
     """Fire session lifecycle hooks with CLI parity."""
     try:
@@ -620,6 +624,8 @@ def _notify_session_boundary(
             finalize_session(
                 session_id=session_id,
                 platform=_resolve_agent_platform(platform),
+                task_contract_id=task_contract_id,
+                trace_id=trace_id,
             )
         else:
             invoke_hook(
@@ -858,7 +864,13 @@ def _finalize_session(session: dict | None, end_reason: str = "tui_close") -> No
 
     session_key = session.get("session_key")
     session_id = getattr(agent, "session_id", None) or session_key
-    _notify_session_boundary("on_session_finalize", session_id, _session_source(session))
+    _notify_session_boundary(
+        "on_session_finalize",
+        session_id,
+        _session_source(session),
+        task_contract_id=getattr(agent, "task_contract_id", None),
+        trace_id=getattr(agent, "trace_id", None),
+    )
 
     # Mark session ended in DB so it doesn't linger as a ghost row in /resume.
     # Use session_id (from agent.session_id) not session_key — after compression,

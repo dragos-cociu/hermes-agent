@@ -1233,6 +1233,8 @@ def _run_cleanup(*, notify_session_finalize: bool = True):
                     session_id=cleanup_session_id,
                     platform="cli",
                     reason="shutdown",
+                    task_contract_id=getattr(_active_agent_ref, "task_contract_id", None),
+                    trace_id=getattr(_active_agent_ref, "trace_id", None),
                 )
         try:
             if _active_agent_ref and hasattr(_active_agent_ref, 'shutdown_memory_provider'):
@@ -1296,6 +1298,8 @@ def _notify_session_finalize(
     session_id: str | None,
     platform: str = "cli",
     reason: str = "shutdown",
+    task_contract_id: str | None = None,
+    trace_id: str | None = None,
 ) -> None:
     try:
         from hermes_cli.lifecycle import finalize_session
@@ -1303,6 +1307,8 @@ def _notify_session_finalize(
             session_id=session_id,
             platform=platform,
             reason=reason,
+            task_contract_id=task_contract_id,
+            trace_id=trace_id,
         )
     except Exception:
         pass
@@ -1363,6 +1369,8 @@ def _notify_single_query_session_finalize(cli, *, reason: str = "shutdown") -> N
             session_id=session_id,
             platform=getattr(agent, "platform", None) or "cli",
             reason=reason,
+            task_contract_id=getattr(agent, "task_contract_id", None),
+            trace_id=getattr(agent, "trace_id", None),
         )
     finally:
         _single_query_finalize_attempted_session_ids.add(session_id)
@@ -5022,6 +5030,8 @@ class HermesCLI(CLIAgentSetupMixin, CLICommandsMixin, CLIBillingMixin):
         checkpoints: bool = False,
         pass_session_id: bool = False,
         ignore_rules: bool = False,
+        task_contract_id: str | None = None,
+        trace_id: str | None = None,
     ):
         """
         Initialize the Hermes CLI.
@@ -5041,6 +5051,8 @@ class HermesCLI(CLIAgentSetupMixin, CLICommandsMixin, CLIBillingMixin):
         """
         # Initialize Rich console
         self.console = Console()
+        self.task_contract_id = task_contract_id
+        self.trace_id = trace_id
         self.config = CLI_CONFIG
         self.compact = compact if compact is not None else CLI_CONFIG["display"].get("compact", False)
         # tool_progress: "off", "new", "all", "verbose" (from config.yaml display section)
@@ -9727,6 +9739,12 @@ class HermesCLI(CLIAgentSetupMixin, CLICommandsMixin, CLIBillingMixin):
         flush_tool_summary()
         _cli_visible_print()
     
+    def _init_agent(self, **kwargs) -> bool:
+        """Build every agent with this CLI session's fixed capture binding."""
+        kwargs["task_contract_id"] = self.task_contract_id
+        kwargs["trace_id"] = self.trace_id
+        return super()._init_agent(**kwargs)
+
     def _notify_session_boundary(self, event_type: str) -> None:
         """Fire a session-boundary plugin hook (on_session_finalize or on_session_reset).
 
@@ -9744,6 +9762,8 @@ class HermesCLI(CLIAgentSetupMixin, CLICommandsMixin, CLIBillingMixin):
                     if event_type == "on_session_reset"
                     else "session_boundary"
                 ),
+                "task_contract_id": getattr(self.agent, "task_contract_id", None),
+                "trace_id": getattr(self.agent, "trace_id", None),
             }
             if event_type == "on_session_finalize":
                 finalize_session(**context)
@@ -21068,6 +21088,8 @@ def main(
     pass_session_id: bool = False,
     ignore_user_config: bool = False,
     ignore_rules: bool = False,
+    task_contract_id: str | None = None,
+    trace_id: str | None = None,
 ):
     """
     Hermes Agent CLI - Interactive AI Assistant
@@ -21258,6 +21280,8 @@ def main(
         checkpoints=checkpoints,
         pass_session_id=pass_session_id,
         ignore_rules=ignore_rules,
+        task_contract_id=task_contract_id,
+        trace_id=trace_id,
     )
 
     if parsed_skills:

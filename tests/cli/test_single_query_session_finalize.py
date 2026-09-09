@@ -76,9 +76,31 @@ def test_notify_single_query_session_finalize_uses_agent_session(monkeypatch):
                 "session_id": "agent-session",
                 "platform": "cli",
                 "reason": "shutdown",
+                "task_contract_id": None,
+                "trace_id": None,
             },
         )
     ]
+
+
+def test_notify_single_query_session_finalize_preserves_agent_binding(monkeypatch):
+    calls = []
+    fake_agent = SimpleNamespace(
+        session_id="agent-session",
+        platform="cli",
+        task_contract_id=" contract ",
+        trace_id="trace-1",
+    )
+    fake_cli = SimpleNamespace(agent=fake_agent, session_id="cli-session")
+    monkeypatch.setattr(
+        "hermes_cli.plugins.invoke_hook",
+        lambda name, **kwargs: calls.append((name, kwargs)),
+    )
+
+    cli._notify_single_query_session_finalize(fake_cli)
+
+    assert calls[0][1]["task_contract_id"] == " contract "
+    assert calls[0][1]["trace_id"] == "trace-1"
 
 
 def test_human_single_query_main_finalizes_after_query(monkeypatch):

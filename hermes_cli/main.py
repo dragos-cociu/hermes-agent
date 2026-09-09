@@ -182,6 +182,8 @@ def _run_and_exit_oneshot(
     toolsets: object = None,
     skills: object = None,
     usage_file: object = None,
+    task_contract_id: object = None,
+    trace_id: object = None,
 ) -> None:
     try:
         from hermes_cli.oneshot import run_oneshot
@@ -193,6 +195,8 @@ def _run_and_exit_oneshot(
             toolsets=toolsets,
             skills=skills,
             usage_file=usage_file,
+            task_contract_id=task_contract_id,
+            trace_id=trace_id,
         )
     except KeyboardInterrupt:
         rc = 130
@@ -576,6 +580,7 @@ def _apply_profile_override() -> None:
     from hermes_cli._parser import top_level_value_flag_sets
 
     value_flags, optional_value_flags = top_level_value_flag_sets()
+    value_flags = value_flags | {"--task-contract-id", "--trace-id"}
     i = 0
     while i < len(argv):
         arg = argv[i]
@@ -3447,6 +3452,8 @@ def cmd_chat(args):
         "ignore_rules": getattr(args, "ignore_rules", False) or getattr(args, "safe_mode", False),
         "ignore_user_config": getattr(args, "ignore_user_config", False) or getattr(args, "safe_mode", False),
         "compact": getattr(args, "compact", False),
+        "task_contract_id": getattr(args, "task_contract_id", None),
+        "trace_id": getattr(args, "trace_id", None),
     }
     # Filter out None values
     kwargs = {k: v for k, v in kwargs.items() if v is not None}
@@ -12364,7 +12371,10 @@ def _first_positional_argv() -> str | None:
     from hermes_cli._parser import top_level_value_flag_sets
 
     required_value_flags, optional_value_flags = top_level_value_flag_sets()
-    value_flags = required_value_flags | optional_value_flags
+    value_flags = required_value_flags | optional_value_flags | {
+        "--task-contract-id",
+        "--trace-id",
+    }
     argv = sys.argv[1:]
     i = 0
     while i < len(argv):
@@ -13129,6 +13139,17 @@ def main():
 
     parser, subparsers, chat_parser = build_top_level_parser()
     chat_parser.set_defaults(func=cmd_chat)
+    for binding_parser in (parser, chat_parser):
+        binding_parser.add_argument(
+            "--task-contract-id",
+            default=None,
+            help="Explicit task-contract capture binding for this session",
+        )
+        binding_parser.add_argument(
+            "--trace-id",
+            default=None,
+            help="Explicit trace capture binding for this session",
+        )
 
     # =========================================================================
     # model command  (parser built in hermes_cli/subcommands/model.py)
@@ -14640,6 +14661,8 @@ def main():
             toolsets=getattr(args, "toolsets", None),
             skills=getattr(args, "skills", None),
             usage_file=getattr(args, "usage_file", None),
+            task_contract_id=getattr(args, "task_contract_id", None),
+            trace_id=getattr(args, "trace_id", None),
         )
 
     # Handle top-level --resume / --continue as shortcut to chat
