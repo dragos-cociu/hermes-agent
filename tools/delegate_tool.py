@@ -1987,6 +1987,8 @@ def _build_child_agent(
                 thinking_callback=child_thinking_cb,
                 session_db=child_session_db,
                 parent_session_id=getattr(parent_agent, "session_id", None),
+                task_contract_id=getattr(parent_agent, "task_contract_id", None),
+                trace_id=getattr(parent_agent, "trace_id", None),
                 providers_allowed=child_providers_allowed,
                 providers_ignored=child_providers_ignored,
                 providers_order=child_providers_order,
@@ -2082,6 +2084,8 @@ def _build_child_agent(
         _invoke_hook(
             "subagent_start",
             parent_session_id=getattr(parent_agent, "session_id", None),
+            task_contract_id=getattr(parent_agent, "task_contract_id", None),
+            trace_id=getattr(parent_agent, "trace_id", None),
             parent_turn_id=getattr(parent_agent, "_current_turn_id", "") or "",
             parent_subagent_id=parent_subagent_id,
             child_session_id=getattr(child, "session_id", None),
@@ -3481,6 +3485,8 @@ def _finalize_child_results(
                 invoke_hook(
                     "subagent_stop",
                     parent_session_id=parent_session_id,
+                    task_contract_id=getattr(parent_agent, "task_contract_id", None),
+                    trace_id=getattr(parent_agent, "trace_id", None),
                     parent_turn_id=getattr(parent_agent, "_current_turn_id", "") or "",
                     child_session_id=getattr(child, "session_id", None),
                     child_role=child_role,

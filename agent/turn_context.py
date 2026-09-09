@@ -1278,6 +1278,8 @@ def build_turn_context(
         _pre_results = _invoke_hook(
             "pre_llm_call",
             session_id=agent.session_id,
+            task_contract_id=getattr(agent, "task_contract_id", None),
+            trace_id=getattr(agent, "trace_id", None),
             task_id=effective_task_id,
             turn_id=turn_id,
             user_message=original_user_message,

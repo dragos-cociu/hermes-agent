@@ -98,7 +98,43 @@ QUEUE_MAX_SIZE = 256
 _TOOL_SCOPED_EVENTS = {"pre_tool_call", "post_tool_call"}
 
 # kwargs promoted to top-level payload keys (mirrors shell hooks wire).
-_TOP_LEVEL_PAYLOAD_KEYS = {"tool_name", "args", "session_id", "parent_session_id"}
+_TOP_LEVEL_PAYLOAD_KEYS = {
+    "tool_name", "args", "session_id", "parent_session_id",
+    "task_contract_id", "trace_id",
+}
+
+_CAPTURE_BINDING_FIELDS = (
+    ("sessionId", "session_id", "parent_session_id"),
+    ("taskContractId", "task_contract_id", None),
+    ("traceId", "trace_id", None),
+)
+
+
+def _valid_binding_value(value: Any) -> bool:
+    """Return whether one explicitly supplied capture-binding value is valid."""
+    return (
+        isinstance(value, str)
+        and bool(value)
+        and len(value) <= 256
+        and "\x00" not in value
+    )
+
+
+def _capture_binding(kwargs: Dict[str, Any]) -> Dict[str, str]:
+    """Build the additive wire binding without repair, inference, or fallback."""
+    # ``session_id`` predates capture binding and is present on ordinary
+    # lifecycle events. It must not activate the additive field by itself;
+    # one of the new runtime-only binding inputs opts the caller in.
+    if kwargs.get("task_contract_id") is None and kwargs.get("trace_id") is None:
+        return {}
+    binding: Dict[str, str] = {}
+    for wire_key, primary_key, alternate_key in _CAPTURE_BINDING_FIELDS:
+        value = kwargs.get(primary_key)
+        if alternate_key is not None and not value:
+            value = kwargs.get(alternate_key)
+        if _valid_binding_value(value):
+            binding[wire_key] = value
+    return binding
 
 # (event, url) pairs already wired to the plugin manager in this process.
 _registered: Set[Tuple[str, str]] = set()
@@ -445,6 +481,9 @@ def _serialize_payload(
         .isoformat()
         .replace("+00:00", "Z"),
     }
+    capture_binding = _capture_binding(kwargs)
+    if capture_binding:
+        payload["captureBinding"] = capture_binding
     return json.dumps(payload, ensure_ascii=False, default=str).encode("utf-8")
 
 

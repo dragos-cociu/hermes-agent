@@ -53,6 +53,32 @@ def test_is_destructive_command_treats_cp_as_mutating():
     assert run_agent._is_destructive_command("cp .env.local .env") is True
 
 
+def test_capture_binding_constructor_values_are_explicit_runtime_state(
+    tmp_path, monkeypatch,
+):
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path / "hermes-home"))
+    with (
+        patch("run_agent._hermes_home", tmp_path / "hermes-home"),
+        patch("run_agent.get_tool_definitions", return_value=[]),
+        patch("run_agent.check_toolset_requirements", return_value={}),
+        patch("run_agent.OpenAI"),
+    ):
+        bound = AIAgent(
+            api_key="test-key", base_url="https://example.invalid/v1",
+            quiet_mode=True, skip_context_files=True, skip_memory=True,
+            task_contract_id=" contract ", trace_id="trace",
+        )
+        unbound = AIAgent(
+            api_key="test-key", base_url="https://example.invalid/v1",
+            quiet_mode=True, skip_context_files=True, skip_memory=True,
+        )
+
+    assert bound.task_contract_id == " contract "
+    assert bound.trace_id == "trace"
+    assert unbound.task_contract_id is None
+    assert unbound.trace_id is None
+
+
 
 
 
@@ -2099,6 +2125,8 @@ class TestConcurrentToolExecution:
                 "web_search", {"q": "test"}, "task-1",
                 tool_call_id=None,
                 session_id=agent.session_id,
+                task_contract_id=None,
+                trace_id=None,
                 turn_id="",
                 api_request_id="",
                 enabled_tools=list(agent.valid_tool_names),

@@ -19,6 +19,21 @@ from model_tools import (
 # =========================================================================
 
 class TestHandleFunctionCall:
+    def test_explicit_capture_binding_reaches_all_tool_hooks(self):
+        with (
+            patch("model_tools.registry.dispatch", return_value='{"ok":true}'),
+            patch("hermes_cli.plugins.has_hook", return_value=True),
+            patch("hermes_cli.plugins.invoke_hook") as invoke,
+        ):
+            handle_function_call(
+                "web_search", {"q": "test"}, session_id="session-1",
+                task_contract_id="contract-1", trace_id="trace-1",
+            )
+
+        for hook in invoke.call_args_list:
+            assert hook.kwargs["task_contract_id"] == "contract-1"
+            assert hook.kwargs["trace_id"] == "trace-1"
+
     def test_agent_loop_tool_returns_error(self):
         for tool_name in _AGENT_LOOP_TOOLS:
             result = json.loads(handle_function_call(tool_name, {}))
