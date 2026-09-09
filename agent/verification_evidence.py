@@ -581,7 +581,7 @@ def record_terminal_result(
     )
     if evidence is None:
         return None
-    return _insert_evidence(evidence)
+    return _insert_evidence(evidence, gate_key=gate_key)
 
 
 def record_verify_run(
@@ -629,7 +629,10 @@ def record_verify_run(
     return _insert_evidence(evidence)
 
 
-def _insert_evidence(evidence: VerificationEvidence) -> dict[str, Any]:
+def _insert_evidence(
+    evidence: VerificationEvidence,
+    gate_key: str | None = None,
+) -> dict[str, Any]:
     """Insert a classified evidence row and repoint the workspace state."""
     created_at = _utc_now()
     with _DB_LOCK:
