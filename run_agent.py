@@ -471,6 +471,8 @@ class AIAgent:
         provider_data_collection: str = None,
         openrouter_min_coding_score: Optional[float] = None,
         session_id: str = None,
+        task_contract_id: str = None,
+        trace_id: str = None,
         tool_progress_callback: callable = None,
         tool_start_callback: callable = None,
         tool_complete_callback: callable = None,
@@ -613,6 +615,10 @@ class AIAgent:
             checkpoint_max_file_size_mb=checkpoint_max_file_size_mb,
             pass_session_id=pass_session_id,
         )
+        # Optional capture telemetry is runtime-only.  Keep it explicit on the
+        # agent instance; validation happens at the outbound wire boundary.
+        self.task_contract_id = task_contract_id
+        self.trace_id = trace_id
 
     def _get_session_db_for_recall(self):
         """Return a SessionDB for recall, lazily creating it if an entrypoint forgot.
@@ -3104,6 +3110,8 @@ class AIAgent:
                 turn_id=turn_id,
                 api_request_id=api_request_id,
                 session_id=self.session_id or "",
+                task_contract_id=getattr(self, "task_contract_id", None),
+                trace_id=getattr(self, "trace_id", None),
                 platform=self.platform or "",
                 model=self.model,
                 provider=self.provider,
@@ -6804,6 +6812,8 @@ class AIAgent:
                 turn_id=getattr(self, "_current_turn_id", "") or "",
                 iteration=int(getattr(self, "_api_call_count", 0) or 0),
                 session_id=self.session_id or "",
+                task_contract_id=getattr(self, "task_contract_id", None),
+                trace_id=getattr(self, "trace_id", None),
                 model=self.model or "",
                 provider=self.provider or "",
                 surface=self.platform or "cli",
@@ -6905,6 +6915,8 @@ class AIAgent:
             "turn_id": getattr(self, "_current_turn_id", "") or "",
             "iteration": int(getattr(self, "_api_call_count", 0) or 0),
             "session_id": self.session_id or "",
+            "task_contract_id": getattr(self, "task_contract_id", None),
+            "trace_id": getattr(self, "trace_id", None),
             "model": self.model or "",
             "provider": self.provider or "",
             "surface": self.platform or "cli",

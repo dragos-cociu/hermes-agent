@@ -336,7 +336,15 @@ class CLIAgentSetupMixin:
         route["request_overrides"] = overrides
         return route
 
-    def _init_agent(self, *, model_override: str = None, runtime_override: dict = None, request_overrides: dict | None = None) -> bool:
+    def _init_agent(
+        self,
+        *,
+        model_override: str = None,
+        runtime_override: dict = None,
+        request_overrides: dict | None = None,
+        task_contract_id: str | None = None,
+        trace_id: str | None = None,
+    ) -> bool:
         """
         Initialize the agent on first use.
         When resuming a session, restores conversation history from SQLite.
@@ -541,6 +549,8 @@ class CLIAgentSetupMixin:
                 notice_callback=self._on_notice,
                 notice_clear_callback=self._on_notice_clear,
                 reaction_callback=self._on_reaction,
+                task_contract_id=task_contract_id,
+                trace_id=trace_id,
             )
             # Store reference for atexit memory provider shutdown.
             # NOTE: this MUST write to the ``cli`` module's global, not a

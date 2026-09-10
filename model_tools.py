@@ -1148,6 +1148,8 @@ def _emit_post_tool_call_hook(
     error_type: Optional[str] = None,
     error_message: Optional[str] = None,
     middleware_trace: Optional[List[Dict[str, Any]]] = None,
+    task_contract_id: Optional[str] = None,
+    trace_id: Optional[str] = None,
 ) -> None:
     """Emit the ``post_tool_call`` observer hook.
 
@@ -1184,6 +1186,8 @@ def _emit_post_tool_call_hook(
             error_type=error_type,
             error_message=error_message,
             middleware_trace=list(middleware_trace or []),
+            task_contract_id=task_contract_id,
+            trace_id=trace_id,
         )
     except Exception as _hook_err:
         logger.debug("post_tool_call hook error: %s", _hook_err)
@@ -1205,6 +1209,8 @@ def handle_function_call(
     tool_request_middleware_trace: Optional[List[Dict[str, Any]]] = None,
     enabled_toolsets: Optional[List[str]] = None,
     disabled_toolsets: Optional[List[str]] = None,
+    task_contract_id: Optional[str] = None,
+    trace_id: Optional[str] = None,
 ) -> str:
     """
     Main function call dispatcher that routes calls to the tool registry.
@@ -1255,6 +1261,8 @@ def handle_function_call(
             api_request_id=api_request_id,
             duration_ms=int((time.monotonic() - _dispatch_start) * 1000),
             middleware_trace=list(_tool_middleware_trace),
+            task_contract_id=task_contract_id,
+            trace_id=trace_id,
         )
         return result
 
@@ -1344,6 +1352,8 @@ def handle_function_call(
                 tool_request_middleware_trace=list(_tool_middleware_trace),
                 enabled_toolsets=enabled_toolsets,
                 disabled_toolsets=disabled_toolsets,
+                task_contract_id=task_contract_id,
+                trace_id=trace_id,
             )
 
     _tool_original_args = dict(function_args)
@@ -1394,6 +1404,8 @@ def handle_function_call(
                     turn_id=turn_id or "",
                     api_request_id=api_request_id or "",
                     middleware_trace=list(_tool_middleware_trace),
+                    task_contract_id=task_contract_id,
+                    trace_id=trace_id,
                 )
                 if modified_args is not None:
                     function_args = modified_args
@@ -1415,6 +1427,8 @@ def handle_function_call(
                     error_type="plugin_block",
                     error_message=block_message,
                     middleware_trace=list(_tool_middleware_trace),
+                    task_contract_id=task_contract_id,
+                    trace_id=trace_id,
                 )
                 return result
 
@@ -1438,6 +1452,8 @@ def handle_function_call(
                     status="blocked",
                     error_type="edit_approval_denied",
                     middleware_trace=list(_tool_middleware_trace),
+                    task_contract_id=task_contract_id,
+                    trace_id=trace_id,
                 )
                 return edit_block_message
         except Exception as _edit_approval_err:
@@ -1456,6 +1472,8 @@ def handle_function_call(
                     status="blocked",
                     error_type="edit_approval_error",
                     middleware_trace=list(_tool_middleware_trace),
+                    task_contract_id=task_contract_id,
+                    trace_id=trace_id,
                 )
                 return result
 
@@ -1544,6 +1562,8 @@ def handle_function_call(
             api_request_id=api_request_id,
             duration_ms=duration_ms,
             middleware_trace=list(_tool_middleware_trace),
+            task_contract_id=task_contract_id,
+            trace_id=trace_id,
         )
 
         # Generic tool-result canonicalization seam: plugins receive the
@@ -1575,6 +1595,8 @@ def handle_function_call(
                     status=status,
                     error_type=error_type,
                     error_message=error_message,
+                    task_contract_id=task_contract_id,
+                    trace_id=trace_id,
                 )
                 for hook_result in hook_results:
                     if isinstance(hook_result, str):
@@ -1608,6 +1630,8 @@ def handle_function_call(
             error_type=type(e).__name__,
             error_message=str(e),
             middleware_trace=list(_tool_middleware_trace),
+            task_contract_id=task_contract_id,
+            trace_id=trace_id,
         )
         return result
 

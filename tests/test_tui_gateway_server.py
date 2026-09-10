@@ -4514,7 +4514,9 @@ def test_session_close_commits_memory_and_fires_finalize_hook(monkeypatch):
     monkeypatch.setattr(
         server,
         "_notify_session_boundary",
-        lambda event, session_id, *_args: calls["hooks"].append((event, session_id)),
+        lambda event, session_id, *_args, **kwargs: calls["hooks"].append(
+            (event, session_id, kwargs)
+        ),
     )
 
     try:
@@ -4523,7 +4525,11 @@ def test_session_close_commits_memory_and_fires_finalize_hook(monkeypatch):
         )
         assert resp["result"]["closed"] is True
         assert calls["history"] == [{"role": "user", "content": "hello"}]
-        assert ("on_session_finalize", "session-key") in calls["hooks"]
+        assert (
+            "on_session_finalize",
+            "session-key",
+            {"task_contract_id": None, "trace_id": None},
+        ) in calls["hooks"]
     finally:
         server._sessions.pop("sid", None)
 
@@ -5148,6 +5154,30 @@ def test_finalize_session_closes_slash_worker(monkeypatch):
     server._finalize_session(session)
     server._teardown_session(session)
     assert closed["count"] == 1
+
+
+def test_finalize_session_preserves_agent_capture_binding(monkeypatch):
+    calls = []
+    agent = types.SimpleNamespace(
+        session_id="session-key",
+        task_contract_id=" contract ",
+        trace_id="trace-1",
+    )
+    monkeypatch.setattr(
+        server,
+        "_notify_session_boundary",
+        lambda *args, **kwargs: calls.append((args, kwargs)),
+    )
+    monkeypatch.setattr(server, "_get_db", lambda: None)
+
+    server._finalize_session(_session(agent=agent))
+
+    assert calls == [
+        (
+            ("on_session_finalize", "session-key", "tui"),
+            {"task_contract_id": " contract ", "trace_id": "trace-1"},
+        )
+    ]
 
 
 def test_close_transport_rebinds_session_to_remaining_viewer(monkeypatch):

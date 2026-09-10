@@ -1881,12 +1881,27 @@ Each firing POSTs a JSON body with the same top-level shape as shell hooks' stdi
   "tool_name": null,
   "tool_input": null,
   "session_id": "sess_abc123",
+  "captureBinding": {
+    "sessionId": "sess_abc123",
+    "taskContractId": "phase5-contract",
+    "traceId": "trace-abc123"
+  },
   "cwd": "/home/user/project",
   "extra": {"completed": true, "interrupted": false, "model": "...", "platform": "cli"},
   "delivery_id": "3f2c9a...",
   "timestamp": "2026-07-22T14:00:00Z"
 }
 ```
+
+`captureBinding` is an additive, runtime-only field and is absent unless the
+caller explicitly binds at least one value. Each of `sessionId`,
+`taskContractId`, and `traceId` is included independently only when it is a
+non-empty string of at most 256 characters with no NUL byte. Values are
+preserved verbatim: Hermes does not trim, repair, derive, or infer them from
+the working directory, prompt, transcript, names, or event order. Delegated
+agents inherit the parent's explicit `taskContractId` and `traceId`. When a
+secret is configured, the existing HMAC covers `captureBinding` as part of the
+raw JSON body. There is no persistent setting that enables this binding.
 
 Headers:
 

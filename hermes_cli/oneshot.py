@@ -206,6 +206,8 @@ def run_oneshot(
     toolsets: object = None,
     skills: object = None,
     usage_file: Optional[str] = None,
+    task_contract_id: Optional[str] = None,
+    trace_id: Optional[str] = None,
 ) -> int:
     """Execute a single prompt and print only the final content block.
 
@@ -221,6 +223,10 @@ def run_oneshot(
             cost, token counts, model, api_calls) is written there after the
             run — even when the run fails — so pipelines can account for
             spend per invocation.
+        task_contract_id: Optional explicit task-contract binding, fixed for
+            this one-shot agent's lifetime.
+        trace_id: Optional explicit trace binding, fixed for this one-shot
+            agent's lifetime.
 
     Returns the exit code.  The caller owns process termination.
     """
@@ -283,6 +289,8 @@ def run_oneshot(
                     toolsets=explicit_toolsets,
                     use_config_toolsets=use_config_toolsets,
                     skills=skills,
+                    task_contract_id=task_contract_id,
+                    trace_id=trace_id,
                 )
             except BaseException as exc:  # noqa: BLE001
                 # Capture anything that escapes the agent (including OSError
@@ -361,6 +369,8 @@ def _run_agent(
     toolsets: object = None,
     use_config_toolsets: bool = True,
     skills: object = None,
+    task_contract_id: Optional[str] = None,
+    trace_id: Optional[str] = None,
 ) -> tuple[str, dict]:
     """Build an AIAgent exactly like a normal CLI chat turn would, then
     run a single conversation.  Returns ``(final_response, run_result)``."""
@@ -487,6 +497,8 @@ def _run_agent(
             credential_pool=runtime.get("credential_pool"),
             fallback_model=_fb or None,
             ephemeral_system_prompt=skills_prompt,
+            task_contract_id=task_contract_id,
+            trace_id=trace_id,
             # Interactive callbacks are intentionally NOT wired beyond this
             # one.  In oneshot mode there's no user sitting at a terminal:
             #   - clarify  → returns a synthetic "pick a default" instruction

@@ -1059,6 +1059,8 @@ class TestPreToolCallDirective:
                     "turn_id": "",
                     "api_request_id": "",
                     "middleware_trace": [],
+                    "task_contract_id": None,
+                    "trace_id": None,
                 },
             )
         ]

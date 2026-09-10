@@ -5785,6 +5785,8 @@ class TurnRunner:
                 # Keep the persona even with minimal context: soul identity is
                 # a single small file, not part of the expensive walk.
                 load_soul_identity=True,
+                task_contract_id=ctx.task_contract_id,
+                trace_id=ctx.trace_id,
             )
             if _cache_lock and _cache is not None:
                 with _cache_lock:
@@ -11103,6 +11105,8 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                 session_id=getattr(agent, "session_id", None),
                 platform="gateway",
                 reason="shutdown",
+                task_contract_id=getattr(agent, "task_contract_id", None),
+                trace_id=getattr(agent, "trace_id", None),
             )
             # Off-loop + bounded: a wedged memory provider here used to hang
             # the whole shutdown so SIGTERM never completed (#53175).
@@ -14034,6 +14038,15 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
 
                 for key, entry in _expired_entries:
                     try:
+                        _cached_agent = None
+                        _cache_lock = getattr(self, "_agent_cache_lock", None)
+                        if _cache_lock is not None:
+                            with _cache_lock:
+                                _cached = self._agent_cache.get(key)
+                                _cached_agent = _cached[0] if isinstance(_cached, tuple) else _cached if _cached else None
+                        if _cached_agent is None:
+                            _exp_state = self._peek_session_state(key)
+                            _cached_agent = _exp_state.turn.agent if _exp_state else None
                         try:
                             _parts = key.split(":")
                             _platform = _parts[2] if len(_parts) > 2 else ""
@@ -14044,23 +14057,14 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                                 session_id=entry.session_id,
                                 platform=_platform,
                                 reason="session_expired",
+                                task_contract_id=getattr(_cached_agent, "task_contract_id", None),
+                                trace_id=getattr(_cached_agent, "trace_id", None),
                             )
                         except Exception:
                             pass
                         # Shut down memory provider and close tool resources
                         # on the cached agent.  Idle agents live in
                         # _agent_cache (not _running_agents), so look there.
-                        _cached_agent = None
-                        _cache_lock = getattr(self, "_agent_cache_lock", None)
-                        if _cache_lock is not None:
-                            with _cache_lock:
-                                _cached = self._agent_cache.get(key)
-                                _cached_agent = _cached[0] if isinstance(_cached, tuple) else _cached if _cached else None
-                        # Fall back to _running_agents in case the agent is
-                        # still mid-turn when the expiry fires.
-                        if _cached_agent is None:
-                            _exp_state = self._peek_session_state(key)
-                            _cached_agent = _exp_state.turn.agent if _exp_state else None
                         if _cached_agent and _cached_agent is not _AGENT_PENDING_SENTINEL:
                             await self._cleanup_agent_resources_off_loop(
                                 _cached_agent, context="session expiry"
@@ -22919,6 +22923,8 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         event_message_id: Optional[str] = None,
         media_urls: Optional[List[str]] = None,
         media_types: Optional[List[str]] = None,
+        task_contract_id: Optional[str] = None,
+        trace_id: Optional[str] = None,
     ) -> None:
         """Profile-scoping wrapper around the background agent task.
 
@@ -22930,12 +22936,14 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         if not getattr(getattr(self, "config", None), "multiplex_profiles", False):
             return await self._run_background_task_inner(
                 prompt, source, task_id, event_message_id, media_urls, media_types,
+                task_contract_id, trace_id,
             )
 
         profile_home = self._resolve_profile_home_for_source(source)
         with _profile_runtime_scope(profile_home):
             return await self._run_background_task_inner(
                 prompt, source, task_id, event_message_id, media_urls, media_types,
+                task_contract_id, trace_id,
             )
 
     def _resolve_enabled_toolsets_for_source(
@@ -22981,6 +22989,8 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         event_message_id: Optional[str] = None,
         media_urls: Optional[List[str]] = None,
         media_types: Optional[List[str]] = None,
+        task_contract_id: Optional[str] = None,
+        trace_id: Optional[str] = None,
     ) -> None:
         """Execute a background agent task and deliver the result to the chat."""
         from run_agent import AIAgent
@@ -23076,6 +23086,8 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                     session_db=getattr(self._session_db, "_db", self._session_db),
                     # Reload from disk — do not reuse the startup snapshot (#60955).
                     fallback_model=self._refresh_fallback_model(),
+                    task_contract_id=task_contract_id,
+                    trace_id=trace_id,
                 )
                 try:
                     return agent.run_conversation(
@@ -28438,6 +28450,8 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         persist_user_timestamp: Optional[float] = None,
         persist_user_display_kind: Optional[str] = None,
         message_type: Optional[str] = None,
+        task_contract_id: Optional[str] = None,
+        trace_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Profile-scoping wrapper around the agent run.
 
@@ -28458,6 +28472,8 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                 persist_user_timestamp=persist_user_timestamp,
                 persist_user_display_kind=persist_user_display_kind,
                 message_type=message_type,
+                task_contract_id=task_contract_id,
+                trace_id=trace_id,
             )
 
         profile_home = self._resolve_profile_home_for_source(source)
@@ -28471,6 +28487,8 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                 persist_user_timestamp=persist_user_timestamp,
                 persist_user_display_kind=persist_user_display_kind,
                 message_type=message_type,
+                task_contract_id=task_contract_id,
+                trace_id=trace_id,
             )
 
     def _profile_name_for_source(self, source: SessionSource) -> Optional[str]:
@@ -28614,6 +28632,8 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         persist_user_timestamp: Optional[float] = None,
         persist_user_display_kind: Optional[str] = None,
         message_type: Optional[str] = None,
+        task_contract_id: Optional[str] = None,
+        trace_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Run the agent with the given message and context.
@@ -28916,6 +28936,8 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
             channel_prompt=channel_prompt,
             session_id=session_id,
             session_key=session_key,
+            task_contract_id=task_contract_id,
+            trace_id=trace_id,
             run_generation=run_generation,
             _interrupt_depth=_interrupt_depth,
             event_message_id=event_message_id,
@@ -30154,6 +30176,8 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                     event_message_id=next_message_id,
                     channel_prompt=next_channel_prompt,
                     message_type=next_message_type,
+                    task_contract_id=task_contract_id,
+                    trace_id=trace_id,
                 )
                 return _preserve_queued_followup_history_offset(result, followup_result)
         finally:

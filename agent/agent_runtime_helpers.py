@@ -3225,6 +3225,8 @@ def invoke_tool(agent, function_name: str, function_args: dict, effective_task_i
                 tool_call_id=tool_call_id or "",
                 turn_id=getattr(agent, "_current_turn_id", "") or "",
                 api_request_id=getattr(agent, "_current_api_request_id", "") or "",
+                task_contract_id=getattr(agent, "task_contract_id", None),
+                trace_id=getattr(agent, "trace_id", None),
                 middleware_trace=list(_tool_middleware_trace),
             )
             if modified_args is not None:
@@ -3241,6 +3243,8 @@ def invoke_tool(agent, function_name: str, function_args: dict, effective_task_i
                 result=result,
                 task_id=effective_task_id or "",
                 session_id=getattr(agent, "session_id", "") or "",
+                task_contract_id=getattr(agent, "task_contract_id", None),
+                trace_id=getattr(agent, "trace_id", None),
                 tool_call_id=tool_call_id or "",
                 turn_id=getattr(agent, "_current_turn_id", "") or "",
                 api_request_id=getattr(agent, "_current_api_request_id", "") or "",
@@ -3265,6 +3269,8 @@ def invoke_tool(agent, function_name: str, function_args: dict, effective_task_i
                 result=result,
                 task_id=effective_task_id or "",
                 session_id=getattr(agent, "session_id", "") or "",
+                task_contract_id=getattr(agent, "task_contract_id", None),
+                trace_id=getattr(agent, "trace_id", None),
                 tool_call_id=tool_call_id or "",
                 turn_id=getattr(agent, "_current_turn_id", "") or "",
                 api_request_id=getattr(agent, "_current_api_request_id", "") or "",
@@ -3464,6 +3470,8 @@ def invoke_tool(agent, function_name: str, function_args: dict, effective_task_i
                 function_name,
                 next_args,
                 effective_task_id,
+                task_contract_id=getattr(agent, "task_contract_id", None),
+                trace_id=getattr(agent, "trace_id", None),
                 **dispatch_kwargs,
             )
 

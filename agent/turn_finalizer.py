@@ -609,6 +609,8 @@ def finalize_turn(
                 "transform_llm_output",
                 response_text=final_response,
                 session_id=agent.session_id or "",
+                task_contract_id=getattr(agent, "task_contract_id", None),
+                trace_id=getattr(agent, "trace_id", None),
                 model=agent.model,
                 platform=getattr(agent, "platform", None) or "",
             )
@@ -631,6 +633,8 @@ def finalize_turn(
             _invoke_hook(
                 "post_llm_call",
                 session_id=agent.session_id,
+                task_contract_id=getattr(agent, "task_contract_id", None),
+                trace_id=getattr(agent, "trace_id", None),
                 task_id=effective_task_id,
                 turn_id=turn_id,
                 user_message=original_user_message,
@@ -827,6 +831,8 @@ def finalize_turn(
         _invoke_hook(
             "on_session_end",
             session_id=agent.session_id,
+            task_contract_id=getattr(agent, "task_contract_id", None),
+            trace_id=getattr(agent, "trace_id", None),
             task_id=effective_task_id,
             turn_id=turn_id,
             completed=completed,

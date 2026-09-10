@@ -16,6 +16,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
 import pytest
+import yaml
 
 from agent import outbound_webhooks
 
@@ -279,6 +280,40 @@ class TestMatcher:
 
 
 class TestPayload:
+    def test_capture_binding_validates_each_explicit_field_independently(self):
+        payload = json.loads(outbound_webhooks._serialize_payload(
+            "post_tool_call",
+            {
+                "session_id": " session ",
+                "task_contract_id": "bad\x00contract",
+                "trace_id": "t" * 256,
+            },
+            "did_binding",
+        ))
+
+        assert payload["captureBinding"] == {
+            "sessionId": " session ",
+            "traceId": "t" * 256,
+        }
+        assert "task_contract_id" not in payload["extra"]
+        assert "trace_id" not in payload["extra"]
+
+    @pytest.mark.parametrize("value", [None, "", 7, "x" * 257, "bad\x00value"])
+    def test_capture_binding_omitted_when_no_field_validates(self, value):
+        payload = json.loads(outbound_webhooks._serialize_payload(
+            "on_session_end",
+            {"session_id": value, "task_contract_id": value, "trace_id": value},
+            "did_unbound",
+        ))
+        assert "captureBinding" not in payload
+
+    def test_unbound_payload_has_no_capture_binding(self):
+        payload = json.loads(outbound_webhooks._serialize_payload(
+            "on_session_end", {"session_id": "existing-session", "completed": True},
+            "did_unbound"
+        ))
+        assert "captureBinding" not in payload
+
     def test_top_level_shape_matches_shell_hooks_wire(self):
         body = outbound_webhooks._serialize_payload(
             "post_tool_call",
@@ -302,6 +337,7 @@ class TestPayload:
         assert payload["extra"]["duration_ms"] == 42
         assert payload["delivery_id"] == "did_1234"
         assert payload["timestamp"].endswith("Z")
+        assert "captureBinding" not in payload
 
     def test_unserialisable_values_stringified(self):
         body = outbound_webhooks._serialize_payload(
@@ -388,6 +424,48 @@ class TestRegistration:
 
 
 class TestDelivery:
+    def test_temporary_hermes_home_config_delivers_signed_binding(
+        self, http_server, tmp_path, monkeypatch,
+    ):
+        secret = "binding-secret"
+        hermes_home = tmp_path / "hermes-home"
+        hermes_home.mkdir()
+        config_path = hermes_home / "config.yaml"
+        config_path.write_text(yaml.safe_dump(_cfg({
+            "url": _url(http_server),
+            "events": ["post_tool_call"],
+            "secret": secret,
+        })))
+        monkeypatch.setenv("HERMES_HOME", str(hermes_home))
+
+        config = yaml.safe_load(config_path.read_text())
+        assert len(outbound_webhooks.register_from_config(config)) == 1
+
+        from hermes_cli.lifecycle import invoke_hook
+
+        invoke_hook(
+            "post_tool_call",
+            tool_name="terminal",
+            args={"command": "true"},
+            session_id="session-e2e",
+            task_contract_id="contract-e2e",
+            trace_id="trace-e2e",
+            status="ok",
+        )
+        assert outbound_webhooks.flush()
+
+        [request] = http_server.captured
+        payload = json.loads(request["body"])
+        assert payload["captureBinding"] == {
+            "sessionId": "session-e2e",
+            "taskContractId": "contract-e2e",
+            "traceId": "trace-e2e",
+        }
+        expected = hmac.new(
+            secret.encode(), request["body"], hashlib.sha256
+        ).hexdigest()
+        assert request["headers"]["X-Hermes-Signature-256"] == f"sha256={expected}"
+
     def test_delivery_with_hmac_signature(self, http_server):
         secret = "s3cret"
         cfg = _cfg(

@@ -6195,6 +6195,8 @@ def _get_pre_tool_call_directive_details(
     turn_id: str = "",
     api_request_id: str = "",
     middleware_trace: Optional[List[Dict[str, Any]]] = None,
+    task_contract_id: Optional[str] = None,
+    trace_id: Optional[str] = None,
 ) -> _PreToolCallDirective:
     """Check ``pre_tool_call`` hooks for a blocking or approval directive.
 
@@ -6242,6 +6244,8 @@ def _get_pre_tool_call_directive_details(
         turn_id=turn_id,
         api_request_id=api_request_id,
         middleware_trace=list(middleware_trace or []),
+        task_contract_id=task_contract_id,
+        trace_id=trace_id,
     )
 
     block_msg: Optional[str] = None
@@ -6437,6 +6441,8 @@ def _dispatch_pre_tool_call_hooks(
     turn_id: str = "",
     api_request_id: str = "",
     middleware_trace: Optional[List[Dict[str, Any]]] = None,
+    task_contract_id: Optional[str] = None,
+    trace_id: Optional[str] = None,
 ) -> Tuple[Optional[str], Optional[Dict[str, Any]]]:
     """Invoke ``pre_tool_call`` hooks once and process all response types.
 
@@ -6460,6 +6466,7 @@ def _dispatch_pre_tool_call_hooks(
         tool_name, args, task_id=task_id, session_id=session_id,
         tool_call_id=tool_call_id, turn_id=turn_id,
         api_request_id=api_request_id, middleware_trace=middleware_trace,
+        task_contract_id=task_contract_id, trace_id=trace_id,
     )
     block_msg = _resolve_block_from_details(
         details, tool_name,
@@ -6477,6 +6484,8 @@ def get_pre_verify_continue_message(
     attempt: int = 0,
     final_response: str = "",
     changed_paths: Optional[List[str]] = None,
+    task_contract_id: Optional[str] = None,
+    trace_id: Optional[str] = None,
 ) -> Optional[str]:
     """Check user ``pre_verify`` hooks for a directive to keep the agent going.
 
@@ -6504,6 +6513,8 @@ def get_pre_verify_continue_message(
         attempt=attempt,
         final_response=final_response,
         changed_paths=list(changed_paths or []),
+        task_contract_id=task_contract_id,
+        trace_id=trace_id,
     )
 
     for result in hook_results:

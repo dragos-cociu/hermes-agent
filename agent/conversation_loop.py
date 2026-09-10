@@ -1049,6 +1049,8 @@ def _restore_or_build_system_prompt(agent, system_message, conversation_history)
         _invoke_hook(
             "on_session_start",
             session_id=agent.session_id,
+            task_contract_id=getattr(agent, "task_contract_id", None),
+            trace_id=getattr(agent, "trace_id", None),
             model=agent.model,
             platform=getattr(agent, "platform", None) or "",
         )
@@ -3066,6 +3068,8 @@ def run_conversation(
                             turn_id=turn_id,
                             api_request_id=api_request_id,
                             session_id=agent.session_id or "",
+                            task_contract_id=getattr(agent, "task_contract_id", None),
+                            trace_id=getattr(agent, "trace_id", None),
                             user_message=original_user_message,
                             conversation_history=list(messages),
                             platform=agent.platform or "",
@@ -6798,6 +6802,8 @@ def run_conversation(
                         turn_id=turn_id,
                         api_request_id=api_request_id,
                         session_id=agent.session_id or "",
+                        task_contract_id=getattr(agent, "task_contract_id", None),
+                        trace_id=getattr(agent, "trace_id", None),
                         platform=agent.platform or "",
                         model=agent.model,
                         provider=agent.provider,
@@ -8298,6 +8304,8 @@ def run_conversation(
                             agent._resolved_is_coding = coding
                         _verify_nudge2 = get_pre_verify_continue_message(
                             session_id=getattr(agent, "session_id", None) or "",
+                            task_contract_id=getattr(agent, "task_contract_id", None),
+                            trace_id=getattr(agent, "trace_id", None),
                             platform=getattr(agent, "platform", "") or "",
                             model=getattr(agent, "model", "") or "",
                             coding=coding,

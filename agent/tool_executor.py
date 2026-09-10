@@ -321,6 +321,8 @@ def _emit_terminal_post_tool_call(
             error_type=error_type,
             error_message=error_message,
             middleware_trace=list(middleware_trace or []),
+            task_contract_id=getattr(agent, "task_contract_id", None),
+            trace_id=getattr(agent, "trace_id", None),
         )
     except Exception:
         pass
@@ -650,6 +652,8 @@ def _run_agent_tool_execution_middleware(
                         api_request_id=getattr(agent, "_current_api_request_id", "")
                         or "",
                         middleware_trace=list(state["middleware_trace"]),
+                        task_contract_id=getattr(agent, "task_contract_id", None),
+                        trace_id=getattr(agent, "trace_id", None),
                     )
                     if modified_args is not None:
                         final_args = modified_args
@@ -2511,6 +2515,8 @@ def execute_tool_calls_sequential(agent, assistant_message, messages: list, effe
                             effective_task_id,
                             tool_call_id=tool_call_id,
                             session_id=agent.session_id or "",
+                            task_contract_id=getattr(agent, "task_contract_id", None),
+                            trace_id=getattr(agent, "trace_id", None),
                             turn_id=getattr(agent, "_current_turn_id", "") or "",
                             api_request_id=getattr(agent, "_current_api_request_id", "")
                             or "",
@@ -2593,6 +2599,8 @@ def execute_tool_calls_sequential(agent, assistant_message, messages: list, effe
                             effective_task_id,
                             tool_call_id=tool_call_id,
                             session_id=agent.session_id or "",
+                            task_contract_id=getattr(agent, "task_contract_id", None),
+                            trace_id=getattr(agent, "trace_id", None),
                             turn_id=getattr(agent, "_current_turn_id", "") or "",
                             api_request_id=getattr(agent, "_current_api_request_id", "")
                             or "",
